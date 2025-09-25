@@ -1,7 +1,7 @@
 package net.havencore.pokehaven;
 
 import net.havencore.pokehaven.capabilities.PokeHavenCapabilities;
-import net.havencore.pokehaven.capabilities.PlayerGuildDataAttachments;
+import net.havencore.pokehaven.capabilities.PlayerDataAttachments;
 import net.havencore.pokehaven.guilds.GuildSavedData;
 import org.slf4j.Logger;
 
@@ -83,7 +83,7 @@ public class PokeHaven
         ITEMS.register(modEventBus);
         // Register the Deferred Register to the mod event bus so tabs get registered
         CREATIVE_MODE_TABS.register(modEventBus);
-        PlayerGuildDataAttachments.ATTACHMENT_TYPES.register(modEventBus);
+        PlayerDataAttachments.ATTACHMENT_TYPES.register(modEventBus);
 
         // Register ourselves for server and other game events we are interested in.
         // Note that this is necessary if and only if we want *this* class (PokeHaven) to respond directly to events.

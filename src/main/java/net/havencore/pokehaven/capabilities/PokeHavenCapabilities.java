@@ -14,11 +14,11 @@ public final class PokeHavenCapabilities {
     }
 
     public static final EntityCapability<PlayerGuildData, Void> PLAYER_GUILD_DATA = EntityCapability.createVoid(
-            ResourceLocation.fromNamespaceAndPath(PokeHaven.MODID, "player_guild_data"),
+            ResourceLocation.fromNamespaceAndPath(PokeHaven.MODID, "player_data"),
             PlayerGuildData.class
     );
 
     public static void register(RegisterCapabilitiesEvent event) {
-        event.registerEntity(PLAYER_GUILD_DATA, EntityType.PLAYER, (player, context) -> new PlayerGuildCapability(player));
+        event.registerEntity(PLAYER_GUILD_DATA, EntityType.PLAYER, (player, context) -> new PlayerDataCapability(player));
     }
 }

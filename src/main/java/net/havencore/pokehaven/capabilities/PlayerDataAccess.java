@@ -5,10 +5,10 @@ import net.minecraft.world.entity.player.Player;
 import java.util.Optional;
 
 /**
- * Helper utilities for querying guild related data stored on players.
+ * Helper utilities for querying persistent capability data stored on players.
  */
-public final class PlayerGuildDataAccess {
-    private PlayerGuildDataAccess() {
+public final class PlayerDataAccess {
+    private PlayerDataAccess() {
     }
 
     public static Optional<PlayerGuildData> get(Player player) {
