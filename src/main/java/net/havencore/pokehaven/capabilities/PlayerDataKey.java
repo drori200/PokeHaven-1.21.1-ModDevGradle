@@ -11,7 +11,7 @@ import org.jetbrains.annotations.NotNull;
  * <ol>
  *     <li>Create a {@code static} {@link PlayerDataKey} constant describing the segment, value path, and data type.</li>
  *     <li>Add getter/setter default methods to your capability view that delegate to the generic
- *     {@code get} and {@code set} helpers exposed by {@link PlayerGuildData}.</li>
+ *     {@code get} and {@code set} helpers exposed by {@link IPlayerData}.</li>
  *     <li>Use the getter/setter methods from gameplay or networking code to read and update the value.</li>
  * </ol>
  *

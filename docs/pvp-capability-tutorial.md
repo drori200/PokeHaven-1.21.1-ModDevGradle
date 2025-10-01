@@ -4,7 +4,7 @@ This tutorial demonstrates how to extend the **segmented player data capability*
 
 - [`PlayerDataAttachment`](../src/main/java/net/havencore/pokehaven/capabilities/PlayerDataAttachment.java) keeps every stored value grouped by segment.
 - [`PlayerDataKey`](../src/main/java/net/havencore/pokehaven/capabilities/PlayerDataKey.java) and [`PlayerDataType`](../src/main/java/net/havencore/pokehaven/capabilities/PlayerDataType.java) describe individual entries and how they serialize.
-- [`PlayerGuildData`](../src/main/java/net/havencore/pokehaven/capabilities/PlayerGuildData.java) exposes the capability API with generic `get`/`set` helpers alongside guild defaults.
+- [`PlayerGuildData`](../src/main/java/net/havencore/pokehaven/capabilities/impl/PlayerGuildData.java) and [`PlayerPVPData`](../src/main/java/net/havencore/pokehaven/capabilities/impl/PlayerPVPData.java) expose topic-specific views backed by the shared [`IPlayerData`](../src/main/java/net/havencore/pokehaven/capabilities/IPlayerData.java) helpers.
 - [`PlayerDataCapability`](../src/main/java/net/havencore/pokehaven/capabilities/PlayerDataCapability.java) is the runtime implementation that automatically synchronizes attachment changes back to clients.
 - [`PlayerDataAccess`](../src/main/java/net/havencore/pokehaven/capabilities/PlayerDataAccess.java) provides a convenience accessor for retrieving the capability from any player instance.
 
@@ -14,17 +14,17 @@ By leaning on this infrastructure we can add new data fields simply by declaring
 
 ## 1. Define a PvP Segment and Keys
 
-First, pick a new segment identifier so PvP data stays isolated from other gameplay systems. Inside `PlayerGuildData` add a constant `ResourceLocation` for the PvP segment along with three `PlayerDataKey` definitions—two booleans and one integer.
+First, pick a new segment identifier so PvP data stays isolated from other gameplay systems. Create a dedicated interface named `PlayerPVPData` under `net.havencore.pokehaven.capabilities.impl`. Have it extend `IPlayerData`, declare the PvP segment, and define three `PlayerDataKey` constants—two booleans and one integer.
 
 ```java
-public interface PlayerGuildData {
+public interface PlayerPVPData extends IPlayerData {
     ResourceLocation PVP_SEGMENT = ResourceLocation.fromNamespaceAndPath(PokeHaven.MODID, "pvp");
 
     PlayerDataKey<Boolean> PVP_ENABLED = PlayerDataKey.bool(PVP_SEGMENT, "enable_pvp");
     PlayerDataKey<Boolean> PVP_ALLOW_STEALING = PlayerDataKey.bool(PVP_SEGMENT, "allow_stealing");
     PlayerDataKey<Integer> PVP_BATTLES_WON = PlayerDataKey.intKey(PVP_SEGMENT, "battles_won");
 
-    // existing guild constants …
+    // guild-specific constants live in PlayerGuildData …
 }
 ```
 
@@ -34,10 +34,10 @@ Each key points at the PvP segment and specifies a distinct value path. The stat
 
 ## 2. Add Getters and Setters to the Capability View
 
-Next, expose friendly accessors right inside `PlayerGuildData`. Because the interface already defines generic `get` and `set` helpers, the new methods become one-liners:
+Next, expose friendly accessors right inside `PlayerPVPData`. Because the interface inherits the generic `get` and `set` helpers from `IPlayerData`, the new methods become one-liners:
 
 ```java
-public interface PlayerGuildData {
+public interface PlayerPVPData extends IPlayerData {
     // …key declarations from above…
 
     default boolean isPvpEnabled() {
@@ -78,10 +78,10 @@ The setters automatically persist changes because `PlayerDataCapability` delegat
 
 The segmented infrastructure already registers and attaches the capability for every player:
 
-- [`PokeHavenCapabilities`](../src/main/java/net/havencore/pokehaven/capabilities/PokeHavenCapabilities.java) registers an `EntityCapability<PlayerGuildData, Void>` and provides `PlayerDataCapability` instances to players during `RegisterCapabilitiesEvent`.
+- [`PokeHavenCapabilities`](../src/main/java/net/havencore/pokehaven/capabilities/PokeHavenCapabilities.java) registers an `EntityCapability<IPlayerData, Void>` and provides `PlayerDataCapability` instances to players during `RegisterCapabilitiesEvent`.
 - `PlayerDataAttachments` configures the underlying [`AttachmentType`](../src/main/java/net/havencore/pokehaven/capabilities/PlayerDataAttachments.java) that persists `PlayerDataAttachment` snapshots.
 
-Because our new PvP keys piggyback on these systems, no additional providers or event hooks are necessary—any code that obtains the `PlayerGuildData` capability automatically gains access to the new methods.
+Because our new PvP keys piggyback on these systems, no additional providers or event hooks are necessary—any code that obtains the capability gains access to the new methods, and `PlayerDataCapability` already implements both `PlayerGuildData` and `PlayerPVPData`.
 
 ---
 
@@ -94,20 +94,20 @@ public final class PvpCapabilityHelper {
     private PvpCapabilityHelper() {}
 
     public static void togglePvp(ServerPlayer player, boolean enabled) {
-        PlayerDataAccess.get(player).ifPresent(data -> data.setPvpEnabled(enabled));
+        PlayerDataAccess.getPvp(player).ifPresent(data -> data.setPvpEnabled(enabled));
     }
 
     public static void toggleStealing(ServerPlayer player, boolean allowed) {
-        PlayerDataAccess.get(player).ifPresent(data -> data.setStealingAllowed(allowed));
+        PlayerDataAccess.getPvp(player).ifPresent(data -> data.setStealingAllowed(allowed));
     }
 
     public static void awardWin(ServerPlayer player) {
-        PlayerDataAccess.get(player).ifPresent(PlayerGuildData::incrementBattlesWon);
+        PlayerDataAccess.getPvp(player).ifPresent(PlayerPVPData::incrementBattlesWon);
     }
 }
 ```
 
-The optional returned by `PlayerDataAccess.get` accounts for cases where a capability might be absent (for example, before entities finish initialization on the logical client). In dedicated server logic you can confidently call `.orElseThrow(...)` if you prefer stricter guarantees.
+The optional returned by `PlayerDataAccess.getPvp` accounts for cases where a capability might be absent (for example, before entities finish initialization on the logical client). In dedicated server logic you can confidently call `.orElseThrow(...)` if you prefer stricter guarantees.
 
 ---
 
@@ -131,21 +131,21 @@ public final class PvpCommands {
 
     private static int setEnabled(CommandContext<CommandSourceStack> ctx, boolean enabled) throws CommandSyntaxException {
         ServerPlayer player = ctx.getSource().getPlayerOrException();
-        PlayerDataAccess.get(player).ifPresent(data -> data.setPvpEnabled(enabled));
+        PlayerDataAccess.getPvp(player).ifPresent(data -> data.setPvpEnabled(enabled));
         ctx.getSource().sendSuccess(() -> Component.literal("PvP " + (enabled ? "enabled" : "disabled")), true);
         return 1;
     }
 
     private static int setStealing(CommandContext<CommandSourceStack> ctx, boolean allowed) throws CommandSyntaxException {
         ServerPlayer player = ctx.getSource().getPlayerOrException();
-        PlayerDataAccess.get(player).ifPresent(data -> data.setStealingAllowed(allowed));
+        PlayerDataAccess.getPvp(player).ifPresent(data -> data.setStealingAllowed(allowed));
         ctx.getSource().sendSuccess(() -> Component.literal("Stealing " + (allowed ? "enabled" : "disabled")), true);
         return 1;
     }
 
     private static int setWins(CommandContext<CommandSourceStack> ctx, int wins) throws CommandSyntaxException {
         ServerPlayer player = ctx.getSource().getPlayerOrException();
-        PlayerDataAccess.get(player).ifPresent(data -> data.setBattlesWon(wins));
+        PlayerDataAccess.getPvp(player).ifPresent(data -> data.setBattlesWon(wins));
         ctx.getSource().sendSuccess(() -> Component.literal("Set PvP wins to " + wins), true);
         return 1;
     }
@@ -168,9 +168,9 @@ public final class PvpCombatHooks {
     @SubscribeEvent
     public static void onPlayerKilled(LivingDeathEvent event) {
         if (event.getSource().getEntity() instanceof ServerPlayer killer && event.getEntity() instanceof ServerPlayer victim) {
-            PlayerDataAccess.get(killer).ifPresent(PlayerGuildData::incrementBattlesWon);
+            PlayerDataAccess.getPvp(killer).ifPresent(PlayerPVPData::incrementBattlesWon);
 
-            PlayerDataAccess.get(victim).ifPresent(data -> {
+            PlayerDataAccess.getPvp(victim).ifPresent(data -> {
                 if (!data.isPvpEnabled()) {
                     // Cancel rewards or apply penalties as needed
                 }

@@ -3,7 +3,7 @@ package net.havencore.pokehaven.commands;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.havencore.pokehaven.capabilities.PlayerDataAccess;
-import net.havencore.pokehaven.capabilities.PlayerGuildData;
+import net.havencore.pokehaven.capabilities.impl.PlayerGuildData;
 import net.havencore.pokehaven.guilds.*;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.arguments.UuidArgument;

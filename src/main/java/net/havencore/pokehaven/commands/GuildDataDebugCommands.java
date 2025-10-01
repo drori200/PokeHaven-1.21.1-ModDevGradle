@@ -8,7 +8,7 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
 import net.havencore.pokehaven.PokeHaven;
 import net.havencore.pokehaven.capabilities.PlayerDataAccess;
-import net.havencore.pokehaven.capabilities.PlayerGuildData;
+import net.havencore.pokehaven.capabilities.impl.PlayerGuildData;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;

@@ -1,5 +1,7 @@
 package net.havencore.pokehaven.capabilities;
 
+import net.havencore.pokehaven.capabilities.impl.PlayerGuildData;
+import net.havencore.pokehaven.capabilities.impl.PlayerPVPData;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
@@ -12,7 +14,7 @@ import java.util.function.Function;
 /**
  * Capability implementation backed by {@link PlayerDataAttachment} stored on the player via NeoForge attachments.
  */
-public final class PlayerDataCapability implements PlayerGuildData {
+public final class PlayerDataCapability implements PlayerGuildData, PlayerPVPData {
     private final Player player;
 
     public PlayerDataCapability(Player player) {
