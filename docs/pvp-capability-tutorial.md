@@ -1,89 +1,68 @@
-# PvP Capability Tutorial
+# PvP Capability Tutorial (Segmented Data Edition)
 
-This tutorial walks through implementing a **player-attached capability** dedicated to tracking PvP preferences and stats. By the end you will have a reusable component that stores:
+This tutorial demonstrates how to extend the **segmented player data capability** that already powers the guild system so it can also track player-vs-player (PvP) preferences. Instead of defining a brand-new capability, we will reuse the generic building blocks introduced earlier:
 
-- `enable_pvp`: whether the player allows PvP combat.
-- `allow_stealing`: whether PvP opponents can loot them.
-- `battles_won`: a running total of PvP victories.
+- [`PlayerDataAttachment`](../src/main/java/net/havencore/pokehaven/capabilities/PlayerDataAttachment.java) keeps every stored value grouped by segment.
+- [`PlayerDataKey`](../src/main/java/net/havencore/pokehaven/capabilities/PlayerDataKey.java) and [`PlayerDataType`](../src/main/java/net/havencore/pokehaven/capabilities/PlayerDataType.java) describe individual entries and how they serialize.
+- [`PlayerGuildData`](../src/main/java/net/havencore/pokehaven/capabilities/PlayerGuildData.java) exposes the capability API with generic `get`/`set` helpers alongside guild defaults.
+- [`PlayerDataCapability`](../src/main/java/net/havencore/pokehaven/capabilities/PlayerDataCapability.java) is the runtime implementation that automatically synchronizes attachment changes back to clients.
+- [`PlayerDataAccess`](../src/main/java/net/havencore/pokehaven/capabilities/PlayerDataAccess.java) provides a convenience accessor for retrieving the capability from any player instance.
 
-The approach mirrors modern NeoForge/Forge practices: use an attachment as the persistence layer, define a capability interface for runtime access, and wire the provider into the mod bootstrap sequence. The steps below assume a NeoForge 1.21 environment, but the same concepts transfer to Forge with minimal renaming.
+By leaning on this infrastructure we can add new data fields simply by declaring keys and delegating to the shared helpers.
 
 ---
 
-## 1. Plan the Data Model
+## 1. Define a PvP Segment and Keys
 
-Create an immutable attachment payload that holds the PvP values. Using Java’s `record` keeps the container concise and value-oriented.
+First, pick a new segment identifier so PvP data stays isolated from other gameplay systems. Inside `PlayerGuildData` add a constant `ResourceLocation` for the PvP segment along with three `PlayerDataKey` definitions—two booleans and one integer.
 
 ```java
-public record PvpSettingsAttachment(boolean enablePvp, boolean allowStealing, int battlesWon) {
-    public static final Codec<PvpSettingsAttachment> CODEC = RecordCodecBuilder.create(instance -> instance.group(
-        Codec.BOOL.fieldOf("enable_pvp").forGetter(PvpSettingsAttachment::enablePvp),
-        Codec.BOOL.fieldOf("allow_stealing").forGetter(PvpSettingsAttachment::allowStealing),
-        Codec.INT.fieldOf("battles_won").forGetter(PvpSettingsAttachment::battlesWon)
-    ).apply(instance, PvpSettingsAttachment::new));
+public interface PlayerGuildData {
+    ResourceLocation PVP_SEGMENT = ResourceLocation.fromNamespaceAndPath(PokeHaven.MODID, "pvp");
 
-    public static PvpSettingsAttachment defaults() {
-        return new PvpSettingsAttachment(false, false, 0);
-    }
+    PlayerDataKey<Boolean> PVP_ENABLED = PlayerDataKey.bool(PVP_SEGMENT, "enable_pvp");
+    PlayerDataKey<Boolean> PVP_ALLOW_STEALING = PlayerDataKey.bool(PVP_SEGMENT, "allow_stealing");
+    PlayerDataKey<Integer> PVP_BATTLES_WON = PlayerDataKey.intKey(PVP_SEGMENT, "battles_won");
 
-    public PvpSettingsAttachment withEnablePvp(boolean flag) {
-        return new PvpSettingsAttachment(flag, allowStealing, battlesWon);
-    }
-
-    public PvpSettingsAttachment withAllowStealing(boolean flag) {
-        return new PvpSettingsAttachment(enablePvp, flag, battlesWon);
-    }
-
-    public PvpSettingsAttachment withBattlesWon(int wins) {
-        return new PvpSettingsAttachment(enablePvp, allowStealing, wins);
-    }
+    // existing guild constants …
 }
 ```
 
-Key points:
-
-- The attachment is immutable—every change creates a new instance. NeoForge detects that change and synchronizes it to clients when `setData` is called.
-- The `CODEC` ensures the attachment serializes to NBT for world saves and respawns.
+Each key points at the PvP segment and specifies a distinct value path. The static factory methods (`bool`, `intKey`, etc.) automatically wire in the correct `PlayerDataType` so the attachment knows which codec to use when persisting the value.
 
 ---
 
-## 2. Register the Attachment Type
+## 2. Add Getters and Setters to the Capability View
 
-Use a deferred register to hook into NeoForge’s attachment registry. This tells the game how to create and persist the PvP settings for each player.
-
-```java
-public final class PvpAttachments {
-    public static final DeferredRegister<AttachmentType<?>> ATTACHMENTS =
-        DeferredRegister.create(NeoForgeRegistries.ATTACHMENT_TYPES, PokeHaven.MOD_ID);
-
-    public static final RegistryObject<AttachmentType<PvpSettingsAttachment>> PVP_SETTINGS =
-        ATTACHMENTS.register("pvp_settings", () -> AttachmentType.builder(PvpSettingsAttachment::defaults)
-            .serializer(PvpSettingsAttachment.CODEC)
-            .copyOnDeath()
-            .build());
-
-    private PvpAttachments() {}
-}
-```
-
-Call `PvpAttachments.ATTACHMENTS.register(eventBus);` inside your mod constructor. The `copyOnDeath()` choice keeps PvP settings through respawns; remove it if you want PvP state reset on death.
-
----
-
-## 3. Define the Capability API
-
-The capability interface exposes getters and setters so gameplay systems can read and mutate PvP preferences.
+Next, expose friendly accessors right inside `PlayerGuildData`. Because the interface already defines generic `get` and `set` helpers, the new methods become one-liners:
 
 ```java
-public interface PvpCapability {
-    boolean isPvpEnabled();
-    void setPvpEnabled(boolean flag);
+public interface PlayerGuildData {
+    // …key declarations from above…
 
-    boolean isStealingAllowed();
-    void setStealingAllowed(boolean flag);
+    default boolean isPvpEnabled() {
+        return get(PVP_ENABLED).orElse(false);
+    }
 
-    int getBattlesWon();
-    void setBattlesWon(int wins);
+    default void setPvpEnabled(boolean enabled) {
+        set(PVP_ENABLED, enabled);
+    }
+
+    default boolean isStealingAllowed() {
+        return get(PVP_ALLOW_STEALING).orElse(false);
+    }
+
+    default void setStealingAllowed(boolean allowed) {
+        set(PVP_ALLOW_STEALING, allowed);
+    }
+
+    default int getBattlesWon() {
+        return get(PVP_BATTLES_WON).orElse(0);
+    }
+
+    default void setBattlesWon(int wins) {
+        set(PVP_BATTLES_WON, wins);
+    }
 
     default void incrementBattlesWon() {
         setBattlesWon(getBattlesWon() + 1);
@@ -91,192 +70,108 @@ public interface PvpCapability {
 }
 ```
 
-Register the capability during the global capability registration event.
-
-```java
-public final class PokeHavenCapabilities {
-    public static final Capability<PvpCapability> PVP_CAPABILITY = CapabilityManager.get(new CapabilityToken<>() {});
-
-    public static void register(RegisterCapabilitiesEvent event) {
-        event.register(PvpCapability.class);
-    }
-
-    private PokeHavenCapabilities() {}
-}
-```
+The setters automatically persist changes because `PlayerDataCapability` delegates to `PlayerDataAttachment.with(...)`, replacing the immutable snapshot and syncing it to the client whenever the value actually changes. Passing `null` into `set` would remove the entry entirely if you ever need to reset to an "unset" state.
 
 ---
 
-## 4. Implement the Capability Wrapper
+## 3. No Capability Plumbing Changes Required
 
-Connect the capability interface to the attachment snapshot stored on each player. The wrapper keeps a reference to the owning `Player` so it can push updates via `setData`.
+The segmented infrastructure already registers and attaches the capability for every player:
 
-```java
-public final class PvpCapabilityImpl implements PvpCapability {
-    private final Player player;
+- [`PokeHavenCapabilities`](../src/main/java/net/havencore/pokehaven/capabilities/PokeHavenCapabilities.java) registers an `EntityCapability<PlayerGuildData, Void>` and provides `PlayerDataCapability` instances to players during `RegisterCapabilitiesEvent`.
+- `PlayerDataAttachments` configures the underlying [`AttachmentType`](../src/main/java/net/havencore/pokehaven/capabilities/PlayerDataAttachments.java) that persists `PlayerDataAttachment` snapshots.
 
-    public PvpCapabilityImpl(Player player) {
-        this.player = player;
-    }
-
-    private PvpSettingsAttachment data() {
-        return player.getData(PvpAttachments.PVP_SETTINGS.get());
-    }
-
-    private void update(PvpSettingsAttachment attachment) {
-        player.setData(PvpAttachments.PVP_SETTINGS.get(), attachment);
-    }
-
-    @Override
-    public boolean isPvpEnabled() {
-        return data().enablePvp();
-    }
-
-    @Override
-    public void setPvpEnabled(boolean flag) {
-        update(data().withEnablePvp(flag));
-    }
-
-    @Override
-    public boolean isStealingAllowed() {
-        return data().allowStealing();
-    }
-
-    @Override
-    public void setStealingAllowed(boolean flag) {
-        update(data().withAllowStealing(flag));
-    }
-
-    @Override
-    public int getBattlesWon() {
-        return data().battlesWon();
-    }
-
-    @Override
-    public void setBattlesWon(int wins) {
-        update(data().withBattlesWon(wins));
-    }
-}
-```
-
-Because attachments are immutable, each setter clones the snapshot with the new value and then stores it back on the player. NeoForge automatically syncs to clients when the value actually changes.
+Because our new PvP keys piggyback on these systems, no additional providers or event hooks are necessary—any code that obtains the `PlayerGuildData` capability automatically gains access to the new methods.
 
 ---
 
-## 5. Expose a Provider
+## 4. Retrieve the Capability at Runtime
 
-Providers attach capabilities to specific entity types. When using attachments, the provider mostly delegates to the player’s attachment storage.
+Whenever gameplay logic needs to read or update PvP state, grab the capability via `PlayerDataAccess` and call the new accessors. Example helper methods:
 
 ```java
-public final class PvpCapabilityProvider implements ICapabilityProvider {
-    private final Player player;
-    private final LazyOptional<PvpCapability> optional;
+public final class PvpCapabilityHelper {
+    private PvpCapabilityHelper() {}
 
-    public PvpCapabilityProvider(Player player) {
-        this.player = player;
-        this.optional = LazyOptional.of(() -> new PvpCapabilityImpl(player));
+    public static void togglePvp(ServerPlayer player, boolean enabled) {
+        PlayerDataAccess.get(player).ifPresent(data -> data.setPvpEnabled(enabled));
     }
 
-    @Override
-    public @NotNull <T> LazyOptional<T> getCapability(Capability<T> cap, @Nullable Direction side) {
-        return cap == PokeHavenCapabilities.PVP_CAPABILITY ? optional.cast() : LazyOptional.empty();
+    public static void toggleStealing(ServerPlayer player, boolean allowed) {
+        PlayerDataAccess.get(player).ifPresent(data -> data.setStealingAllowed(allowed));
+    }
+
+    public static void awardWin(ServerPlayer player) {
+        PlayerDataAccess.get(player).ifPresent(PlayerGuildData::incrementBattlesWon);
     }
 }
 ```
 
-Attach the provider during the player attachment event.
-
-```java
-@Mod.EventBusSubscriber(modid = PokeHaven.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
-public final class PvpCapabilityEvents {
-    @SubscribeEvent
-    public static void onAttachCapabilities(AttachCapabilitiesEvent<Entity> event) {
-        if (event.getObject() instanceof Player player) {
-            event.addCapability(new ResourceLocation(PokeHaven.MOD_ID, "pvp"), new PvpCapabilityProvider(player));
-        }
-    }
-}
-```
+The optional returned by `PlayerDataAccess.get` accounts for cases where a capability might be absent (for example, before entities finish initialization on the logical client). In dedicated server logic you can confidently call `.orElseThrow(...)` if you prefer stricter guarantees.
 
 ---
 
-## 6. Convenience Accessors
+## 5. Command Showcase
 
-Add a helper so any gameplay system can look up the capability on demand.
-
-```java
-public final class PvpCapabilityAccess {
-    public static Optional<PvpCapability> get(Player player) {
-        return player.getCapability(PokeHavenCapabilities.PVP_CAPABILITY).resolve();
-    }
-
-    public static PvpCapability require(Player player) {
-        return get(player).orElseThrow(() -> new IllegalStateException("Missing PvP capability"));
-    }
-
-    private PvpCapabilityAccess() {}
-}
-```
-
----
-
-## 7. Using the Capability In-Game
-
-Once registered and attached, other systems can integrate with the PvP data.
-
-### Toggle Command Example
+Here is a Brigadier command that surfaces the PvP controls to players and administrators using the new getters and setters:
 
 ```java
-public class PvpCommands {
+public final class PvpCommands {
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("pvp")
-            .then(Commands.literal("enable").executes(ctx -> togglePvp(ctx, true)))
-            .then(Commands.literal("disable").executes(ctx -> togglePvp(ctx, false)))
+            .then(Commands.literal("enable").executes(ctx -> setEnabled(ctx, true)))
+            .then(Commands.literal("disable").executes(ctx -> setEnabled(ctx, false)))
             .then(Commands.literal("stealing")
-                .then(Commands.literal("enable").executes(ctx -> toggleStealing(ctx, true)))
-                .then(Commands.literal("disable").executes(ctx -> toggleStealing(ctx, false))))
+                .then(Commands.literal("enable").executes(ctx -> setStealing(ctx, true)))
+                .then(Commands.literal("disable").executes(ctx -> setStealing(ctx, false))))
             .then(Commands.literal("wins")
-                .then(Commands.argument("wins", IntegerArgumentType.integer(0))
-                    .executes(ctx -> setWins(ctx, IntegerArgumentType.getInteger(ctx, "wins"))))));
+                .then(Commands.argument("count", IntegerArgumentType.integer(0))
+                    .executes(ctx -> setWins(ctx, IntegerArgumentType.getInteger(ctx, "count"))))));
     }
 
-    private static int togglePvp(CommandContext<CommandSourceStack> ctx, boolean flag) throws CommandSyntaxException {
+    private static int setEnabled(CommandContext<CommandSourceStack> ctx, boolean enabled) throws CommandSyntaxException {
         ServerPlayer player = ctx.getSource().getPlayerOrException();
-        PvpCapabilityAccess.require(player).setPvpEnabled(flag);
-        ctx.getSource().sendSuccess(() -> Component.literal("PvP " + (flag ? "enabled" : "disabled")), true);
+        PlayerDataAccess.get(player).ifPresent(data -> data.setPvpEnabled(enabled));
+        ctx.getSource().sendSuccess(() -> Component.literal("PvP " + (enabled ? "enabled" : "disabled")), true);
         return 1;
     }
 
-    private static int toggleStealing(CommandContext<CommandSourceStack> ctx, boolean flag) throws CommandSyntaxException {
+    private static int setStealing(CommandContext<CommandSourceStack> ctx, boolean allowed) throws CommandSyntaxException {
         ServerPlayer player = ctx.getSource().getPlayerOrException();
-        PvpCapabilityAccess.require(player).setStealingAllowed(flag);
-        ctx.getSource().sendSuccess(() -> Component.literal("Stealing " + (flag ? "enabled" : "disabled")), true);
+        PlayerDataAccess.get(player).ifPresent(data -> data.setStealingAllowed(allowed));
+        ctx.getSource().sendSuccess(() -> Component.literal("Stealing " + (allowed ? "enabled" : "disabled")), true);
         return 1;
     }
 
     private static int setWins(CommandContext<CommandSourceStack> ctx, int wins) throws CommandSyntaxException {
         ServerPlayer player = ctx.getSource().getPlayerOrException();
-        PvpCapabilityAccess.require(player).setBattlesWon(wins);
+        PlayerDataAccess.get(player).ifPresent(data -> data.setBattlesWon(wins));
         ctx.getSource().sendSuccess(() -> Component.literal("Set PvP wins to " + wins), true);
         return 1;
     }
 }
 ```
 
-### Combat Hook Example
+Every handler simply resolves the capability and delegates to the default methods we added earlier—no attachment plumbing or serialization concerns leak into the command layer.
 
-Update win counts automatically when PvP combat resolves.
+---
+
+## 6. Gameplay Hooks
+
+Combat events, GUI buttons, or network handlers can all modify the same data. For example, increment the victory counter whenever one player defeats another:
 
 ```java
-@Mod.EventBusSubscriber(modid = PokeHaven.MOD_ID)
+@Mod.EventBusSubscriber(modid = PokeHaven.MODID)
 public final class PvpCombatHooks {
+    private PvpCombatHooks() {}
+
     @SubscribeEvent
     public static void onPlayerKilled(LivingDeathEvent event) {
         if (event.getSource().getEntity() instanceof ServerPlayer killer && event.getEntity() instanceof ServerPlayer victim) {
-            PvpCapabilityAccess.get(killer).ifPresent(cap -> cap.setBattlesWon(cap.getBattlesWon() + 1));
+            PlayerDataAccess.get(killer).ifPresent(PlayerGuildData::incrementBattlesWon);
 
-            PvpCapabilityAccess.get(victim).ifPresent(cap -> {
-                if (!cap.isPvpEnabled()) {
+            PlayerDataAccess.get(victim).ifPresent(data -> {
+                if (!data.isPvpEnabled()) {
                     // Cancel rewards or apply penalties as needed
                 }
             });
@@ -285,14 +180,16 @@ public final class PvpCombatHooks {
 }
 ```
 
+Because the attachment is immutable, each setter call swaps in a fresh `PlayerDataAttachment` instance; `PlayerDataCapability` detects the change and triggers `ServerPlayer#syncData`, ensuring the client mirrors the server-side state.
+
 ---
 
-## 8. Testing Checklist
+## 7. Testing Checklist
 
-1. Launch the game and join a world.
-2. Run `/pvp enable` to allow PvP; verify the value syncs to the client (try logging out/in).
-3. Run `/pvp stealing enable` and ensure the flag persists.
-4. Use `/pvp wins 5` and confirm the command updates the attachment.
-5. Simulate PvP kills to ensure `battles_won` increments properly.
+1. Launch the game and run `/pvp enable` to confirm the flag toggles and persists after relogging.
+2. Toggle stealing permissions and verify any UI or gameplay checks read the updated value.
+3. Use `/pvp wins <number>` to validate manual updates.
+4. Trigger PvP combat to confirm win counts increment automatically.
+5. Inspect the saved player data (e.g., via `/guilddata show <player>`) to see the PvP segment entries alongside guild metadata.
 
-Following these steps yields a modular capability that centralizes PvP configuration and stats, making it easy to extend with new fields (e.g., Elo rating, duel requests) by evolving the attachment record and exposing additional getters/setters in the capability implementation.
+With these additions the PvP system coexists cleanly with other gameplay data, and future fields are as simple as adding new `PlayerDataKey` constants plus matching default accessors.
