@@ -2,6 +2,8 @@ package net.havencore.pokehaven.commands;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import net.havencore.pokehaven.capabilities.PlayerDataAccess;
+import net.havencore.pokehaven.capabilities.impl.PlayerGuildData;
 import net.havencore.pokehaven.guilds.*;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.arguments.UuidArgument;
@@ -11,6 +13,7 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 
 import java.util.UUID;
+import java.util.function.Consumer;
 
 import static net.minecraft.commands.Commands.argument;
 import static net.minecraft.commands.Commands.literal;
@@ -127,6 +130,11 @@ public class GuildCommands {
             GuildSavedData data = GuildSavedData.get(src.getServer());
             data.addPlayerToGuildSave(guildName, target);
             src.sendSuccess(() -> Component.literal("Joined guild " + guildName), true);
+            updatePlayerData(src, target, playerData -> {
+                playerData.setGuildName(guildName.name());
+                playerData.setFactionName(null);
+                playerData.setFactionLeader(false);
+            });
             return 1;
         } catch (Exception e) {
             src.sendFailure(Component.literal("Error: " + e.getMessage()));
@@ -141,6 +149,7 @@ public class GuildCommands {
             GuildName current = data.getGuildOfPlayer(target);
             data.removePlayerFromGuildSave(current, target);
             src.sendSuccess(() -> Component.literal("Left guild " + current), true);
+            updatePlayerData(src, target, PlayerGuildData::clearGuildMembership);
             return 1;
         } catch (Exception e) {
             src.sendFailure(Component.literal("Error: " + e.getMessage()));
@@ -156,6 +165,10 @@ public class GuildCommands {
             data.createFaction(guild, factionName, leader);
             data.setDirty();
             src.sendSuccess(() -> Component.literal("Created faction " + factionName), true);
+            updatePlayerData(src, leader, playerData -> {
+                playerData.setFactionName(factionName);
+                playerData.setFactionLeader(true);
+            });
             return 1;
         } catch (Exception e) {
             src.sendFailure(Component.literal("Error: " + e.getMessage()));
@@ -169,6 +182,10 @@ public class GuildCommands {
             GuildName guild = data.getGuildOfPlayer(target);
             data.addPlayerToFactionSave(guild, factionName, target);
             src.sendSuccess(() -> Component.literal("Joined faction " + factionName), true);
+            updatePlayerData(src, target, playerData -> {
+                playerData.setFactionName(factionName);
+                playerData.setFactionLeader(false);
+            });
             return 1;
         } catch (Exception e) {
             src.sendFailure(Component.literal("Error: " + e.getMessage()));
@@ -184,6 +201,10 @@ public class GuildCommands {
             String faction = data.getFactionOfPlayer(target);
             data.removePlayerFromFactionSave(guild, faction, target);
             src.sendSuccess(() -> Component.literal("Left faction " + faction), true);
+            updatePlayerData(src, target, playerData -> {
+                playerData.setFactionName(null);
+                playerData.setFactionLeader(false);
+            });
             return 1;
         } catch (Exception e) {
             src.sendFailure(Component.literal("Error: " + e.getMessage()));
@@ -205,5 +226,13 @@ public class GuildCommands {
             src.sendFailure(Component.literal("Error: " + e.getMessage()));
             return 0;
         }
+    }
+
+    private static void updatePlayerData(CommandSourceStack src, UUID target, Consumer<PlayerGuildData> update) {
+        var player = src.getServer().getPlayerList().getPlayer(target);
+        if (player == null) {
+            return;
+        }
+        PlayerDataAccess.get(player).ifPresent(update);
     }
 }
