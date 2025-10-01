@@ -127,7 +127,7 @@ configurations {
 dependencies {
     implementation "net.neoforged:testframework:${project.neo_version}"
     //implementation "net.neoforged:neoforge:${neo_version}"
-    implementation "curse.maven:pixelmon-389487:6914681"
+   // implementation "curse.maven:pixelmon-389487:6914681"
     // Example optional mod dependency with JEI
     // The JEI API is declared for compile time use, while the full JEI artifact is used at runtime
     // compileOnly "mezz.jei:jei-${mc_version}-common-api:${jei_version}"
